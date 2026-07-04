@@ -13,6 +13,7 @@ import json
 from datetime import date
 from pathlib import Path
 from typing import Callable, Sequence
+from urllib.parse import urlparse
 
 from proto.argument_graph import Evidence, EvidenceLevel
 from proto.llm_client import LLMClient
@@ -68,7 +69,11 @@ def search_and_archive(
     evidence: list[Evidence] = []
     for i, result in enumerate(results[:limit], start=1):
         url = result["url"]
-        domain = result.get("domain") or url.split("/")[2]
+        # urlparse never raises on a malformed URL (unlike a manual
+        # url.split("/")[2], which IndexErrors on a scheme-less or truncated
+        # URL from an external search service) -- an empty netloc just falls
+        # through to the N3 fallback below like any other unrecognized domain.
+        domain = result.get("domain") or urlparse(url).netloc
         extracted = extract_fn(url)
         raw_html = extracted.get("raw", "")
         content_hash = _sha256(raw_html.encode("utf-8"))

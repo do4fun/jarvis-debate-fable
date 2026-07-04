@@ -120,6 +120,31 @@ class TestTrustWeightStore(unittest.TestCase):
         self.assertIn("advocate", weights)
         self.assertIn("challenger", weights)
 
+    def test_get_history_empty_when_no_updates(self):
+        self.assertEqual(self.store.get_history(), [])
+
+    def test_get_history_records_every_update_in_order(self):
+        self.store.update_on_ground_truth("advocate", was_correct=True)
+        self.store.update_on_ground_truth("advocate", was_correct=False)
+        history = self.store.get_history("advocate")
+        self.assertEqual(len(history), 2)
+        self.assertAlmostEqual(history[0]["weight"], 0.75)
+        self.assertAlmostEqual(history[1]["weight"], 0.375)  # 0.5*0 + 0.5*0.75
+        self.assertTrue(history[0]["was_correct"])
+        self.assertFalse(history[1]["was_correct"])
+        self.assertIn("timestamp", history[0])
+
+    def test_get_history_filters_by_agent(self):
+        self.store.update_on_ground_truth("advocate", was_correct=True)
+        self.store.update_on_ground_truth("challenger", was_correct=True)
+        self.assertEqual(len(self.store.get_history("advocate")), 1)
+        self.assertEqual(len(self.store.get_history()), 2)
+
+    def test_history_persists_across_store_instances(self):
+        self.store.update_on_ground_truth("advocate", was_correct=True)
+        reloaded = TrustWeightStore(path=self.path, alpha=0.5, initial_weight=0.5)
+        self.assertEqual(len(reloaded.get_history("advocate")), 1)
+
 
 if __name__ == "__main__":
     unittest.main()

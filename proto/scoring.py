@@ -13,9 +13,9 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, datetime, timezone
 from pathlib import Path
-from typing import Mapping
+from typing import Mapping, Sequence
 
 from proto.argument_graph import Claim, Evidence, EvidenceLevel
 
@@ -67,6 +67,16 @@ def argument_credibility(
     if not cited:
         return 0.0
     return sum(evidence_credibility(e, as_of, **kwargs) for e in cited) / len(cited)  # type: ignore[arg-type]
+
+
+def stances_from_claims(claims: Sequence[Claim]) -> dict[str, float]:
+    """Simplified per-debate stance aggregation feeding S(o): the last claim
+    per author_role wins. A prototype-scope simplification -- with 2
+    debaters in imposed pro/contra roles (v4: "un vote pondéré des stances
+    n'a pas de sens seul"), S(o) is one signal among several for the judge,
+    never a vote that replaces it. Shared by `proto/pipeline.py` and
+    `proto/judge_bridge.py` so both compute S(o) the same way."""
+    return {c.author_role: (1.0 if c.stance.value == "support" else 0.0) for c in claims}
 
 
 def consensus_score(stances: Mapping[str, float], trust_weights: Mapping[str, float]) -> float:
@@ -127,5 +137,21 @@ class TrustWeightStore:
         alpha = data.get("alpha", self.alpha)
         new_weight = alpha * reward + (1 - alpha) * prev
         data["weights"][agent_id] = new_weight
+        data.setdefault("history", []).append({
+            "agent_id": agent_id,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "was_correct": was_correct,
+            "weight": new_weight,
+        })
         self._save(data)
         return new_weight
+
+    def get_history(self, agent_id: str | None = None) -> list[dict]:
+        """Full EMA update history (v4 4.2: "trust_weights finaux et leurs
+        courbes de dérive font partie des livrables documentés"). Filtered
+        to one agent if `agent_id` is given, else every update across all
+        agents in chronological order."""
+        history = self._load().get("history", [])
+        if agent_id is None:
+            return history
+        return [entry for entry in history if entry["agent_id"] == agent_id]

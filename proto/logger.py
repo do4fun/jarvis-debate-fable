@@ -9,6 +9,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from proto.paths import safe_id
+
 DEFAULT_SESSIONS_DIR = Path("results/sessions")
 
 
@@ -27,6 +29,6 @@ class SessionLogger:
 
     def write(self) -> Path:
         self.sessions_dir.mkdir(parents=True, exist_ok=True)
-        path = self.sessions_dir / f"{self.session_id}_full.json"
+        path = self.sessions_dir / f"{safe_id(self.session_id)}_full.json"
         path.write_text(json.dumps(self.to_dict(), ensure_ascii=False, indent=2), encoding="utf-8")
         return path

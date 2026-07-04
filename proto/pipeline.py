@@ -24,13 +24,14 @@ from proto.checkpoint import CheckpointStore
 from proto.debate_local import Verdict
 from proto.llm_client import LLMClient
 from proto.logger import SessionLogger
-from proto.scoring import DEFAULT_THETA, TrustWeightStore, argument_credibility, consensus_score
+from proto.scoring import DEFAULT_THETA, TrustWeightStore, argument_credibility, consensus_score, stances_from_claims
 
 STEP_ORDER = (
     "web_research",
     "brainstorming",
     "thesis",
     "antithesis",
+    "rebuttal",
     "conflict_detection",
     "argument_graph",
     "synthesis",
@@ -143,40 +144,90 @@ def run_pipeline(
             checkpoint("web_research", {"anchor_query": anchor_query, "evidence": [e.to_dict() for e in evidence]})
 
     # [2] Brainstorming -- énumère les options/angles depuis la fiche de faits.
+    # Alimente les positions initiales sans les figer (v4) : injecté dans le
+    # prompt des tours 1 de thèse/antithèse ci-dessous, non contraignant.
     if done("brainstorming"):
-        pass  # notes already logged; nothing downstream consumes them structurally yet
+        brainstorm_notes = state["brainstorming"]["notes"]
     else:
         brainstormer = config.brainstormer or config.advocate
         model = config.model_for("brainstorming", brainstormer)
         fact_sheet = "\n".join(f"[{e.id}] {e.excerpt}" for e in evidence)
-        notes = llm_client.complete(
+        brainstorm_notes = llm_client.complete(
             f"Question: {question}\n\nFact sheet:\n{fact_sheet}",
             model=model,
             system="Enumerate the options/angles relevant to this question from the fact sheet only. Be concise.",
         )
-        checkpoint("brainstorming", {"notes": notes})
+        checkpoint("brainstorming", {"notes": brainstorm_notes})
 
-    # [3] Thèse (advocate)
+    # [3] Thèse (advocate) -- tour 1
     if done("thesis"):
-        advocate_claims = [Claim.from_dict(c) for c in state["thesis"]["claims"]]
+        advocate_claims_r1 = [Claim.from_dict(c) for c in state["thesis"]["claims"]]
     else:
         model = config.model_for("thesis", config.advocate)
-        advocate_claims = debate_local.generate_position(llm_client, model, "advocate", question, evidence, "advocate")
-        checkpoint("thesis", {"claims": [c.to_dict() for c in advocate_claims]})
+        advocate_claims_r1 = debate_local.generate_position(
+            llm_client, model, "advocate", question, evidence, "advocate", brainstorming_notes=brainstorm_notes
+        )
+        checkpoint("thesis", {"claims": [c.to_dict() for c in advocate_claims_r1]})
 
-    # [4] Antithèse (challenger) -- parallèle par défaut : pas de visibilité
-    # sur les claims de l'advocate au tour 1 (nécessaire à F3/F9).
+    # [4] Antithèse (challenger) -- tour 1, parallèle par défaut : pas de
+    # visibilité sur les claims de l'advocate (nécessaire à F3/F9).
     if done("antithesis"):
-        challenger_claims = [Claim.from_dict(c) for c in state["antithesis"]["claims"]]
+        challenger_claims_r1 = [Claim.from_dict(c) for c in state["antithesis"]["claims"]]
     else:
         model = config.model_for("antithesis", config.challenger)
-        opposing = advocate_claims if config.speaking_order == "sequential" else ()
-        challenger_claims = debate_local.generate_position(
-            llm_client, model, "challenger", question, evidence, "challenger", opposing_claims=opposing
+        opposing = advocate_claims_r1 if config.speaking_order == "sequential" else ()
+        challenger_claims_r1 = debate_local.generate_position(
+            llm_client, model, "challenger", question, evidence, "challenger",
+            opposing_claims=opposing, brainstorming_notes=brainstorm_notes,
         )
-        checkpoint("antithesis", {"claims": [c.to_dict() for c in challenger_claims]})
+        checkpoint("antithesis", {"claims": [c.to_dict() for c in challenger_claims_r1]})
+
+    # Arrêt anticipé (correction F3) : mécanique, non-LLM -- si le tour 1 ne
+    # produit aucun conflit détecté (citations concordantes, pas de rebuttal
+    # ni de désaccord sur évidence partagée), le tour 2 est sauté. Sinon,
+    # tour 2 obligatoire : chaque débatteur réfute le résumé structuré de
+    # l'autre (F5 -- generate_position ne transmet jamais la prose brute,
+    # seulement les claims structurés de l'autre tour).
+    round1_graph = ArgumentGraph()
+    for e in evidence:
+        round1_graph.add_evidence(e)
+    for c in advocate_claims_r1 + challenger_claims_r1:
+        round1_graph.add_claim(c)
+    round1_converged = len(round1_graph.detect_conflicts()) == 0
+
+    if done("rebuttal"):
+        rebuttal_state = state["rebuttal"]
+        if rebuttal_state["skipped"]:
+            advocate_claims_r2, challenger_claims_r2 = [], []
+        else:
+            advocate_claims_r2 = [Claim.from_dict(c) for c in rebuttal_state["advocate_claims"]]
+            challenger_claims_r2 = [Claim.from_dict(c) for c in rebuttal_state["challenger_claims"]]
+    elif round1_converged:
+        advocate_claims_r2, challenger_claims_r2 = [], []
+        checkpoint("rebuttal", {"skipped": True, "reason": "tour 1 convergent, citations concordantes (F3)"})
+    else:
+        model_advocate = config.model_for("rebuttal", config.advocate)
+        model_challenger = config.model_for("rebuttal", config.challenger)
+        advocate_claims_r2 = debate_local.generate_position(
+            llm_client, model_advocate, "advocate", question, evidence, "advocate-r2",
+            opposing_claims=challenger_claims_r1,
+        )
+        challenger_claims_r2 = debate_local.generate_position(
+            llm_client, model_challenger, "challenger", question, evidence, "challenger-r2",
+            opposing_claims=advocate_claims_r1,
+        )
+        checkpoint("rebuttal", {
+            "skipped": False,
+            "advocate_claims": [c.to_dict() for c in advocate_claims_r2],
+            "challenger_claims": [c.to_dict() for c in challenger_claims_r2],
+        })
+
+    advocate_claims = advocate_claims_r1 + advocate_claims_r2
+    challenger_claims = challenger_claims_r1 + challenger_claims_r2
 
     # [5]+[6] Détection de conflits + argument graph -- mécanique, non-LLM.
+    # Reconstruit sur l'ensemble tour 1 + tour 2 (le round1_graph ci-dessus
+    # ne servait qu'à la décision d'arrêt anticipé).
     graph = ArgumentGraph()
     for e in evidence:
         graph.add_evidence(e)
@@ -194,11 +245,7 @@ def run_pipeline(
     # Signaux pour le juge : S(o) et C(a_i) -- jamais un remplacement du verdict.
     evidence_by_id = {e.id: e for e in evidence}
     c_scores = {c.id: argument_credibility(c, evidence_by_id, as_of) for c in graph.claims}
-    # Simplification de prototype : avec 2 débatteurs aux rôles imposés
-    # (pro/contra), v_i(o) est approximé par le sens de la stance déclarée de
-    # chaque rôle plutôt qu'un vote sur options multiples -- S(o) reste un
-    # signal d'entrée du juge (v4), jamais un vote qui le remplace.
-    stances = {c.author_role: (1.0 if c.stance.value == "support" else 0.0) for c in graph.claims}
+    stances = stances_from_claims(graph.claims)
     weights = trust_weights.all_weights()
     s_scores = {"consensus": consensus_score(stances, weights), "theta": config.theta}
 

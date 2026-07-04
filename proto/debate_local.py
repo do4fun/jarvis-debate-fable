@@ -47,6 +47,7 @@ def generate_position(
     evidence: Sequence[Evidence],
     claim_id_prefix: str,
     opposing_claims: Sequence[Claim] = (),
+    brainstorming_notes: str = "",
 ) -> list[Claim]:
     """One LLM call producing a list of Claims for `role` (advocate/challenger).
 
@@ -54,8 +55,14 @@ def generate_position(
     visibility by default -- `DebateConfig.speaking_order`); pass the
     structured summary of the other side only for a round-2 rebuttal
     (v3 correction F5: summary, never raw prose).
+
+    `brainstorming_notes` (v4 pipeline step [2]) feeds the options/angles
+    enumerated before either debater takes a position -- non-binding, it
+    informs the position without fixing it.
     """
     prompt_parts = [f"Question: {question}", "Fact sheet:", _build_fact_sheet(evidence)]
+    if brainstorming_notes:
+        prompt_parts += ["Brainstorming (options/angles, non-binding):", brainstorming_notes]
     if opposing_claims:
         summary = "\n".join(
             f"[{c.id}] {c.text} (cites: {', '.join(c.cited_evidence_ids) or 'none'})" for c in opposing_claims

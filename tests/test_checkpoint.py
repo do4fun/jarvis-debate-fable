@@ -3,6 +3,7 @@ import unittest
 from pathlib import Path
 
 from proto.checkpoint import CheckpointStore
+from proto.paths import UnsafeIdentifierError
 
 
 class TestCheckpointStore(unittest.TestCase):
@@ -54,6 +55,14 @@ class TestCheckpointStore(unittest.TestCase):
         self.store.save("s1", "thesis", {})
         tmp_files = list(Path(self.tmpdir.name).glob("*.tmp"))
         self.assertEqual(tmp_files, [])
+
+    def test_save_rejects_path_traversal_session_id(self):
+        with self.assertRaises(UnsafeIdentifierError):
+            self.store.save("../escape", "thesis", {})
+
+    def test_load_rejects_path_traversal_session_id(self):
+        with self.assertRaises(UnsafeIdentifierError):
+            self.store.load("../escape")
 
 
 if __name__ == "__main__":

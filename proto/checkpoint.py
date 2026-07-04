@@ -12,6 +12,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from proto.paths import safe_id
+
 DEFAULT_SESSIONS_DIR = Path("results/sessions")
 
 
@@ -36,7 +38,7 @@ class CheckpointStore:
         self.sessions_dir = Path(sessions_dir)
 
     def _path(self, session_id: str) -> Path:
-        return self.sessions_dir / f"{session_id}.checkpoint.json"
+        return self.sessions_dir / f"{safe_id(session_id)}.checkpoint.json"
 
     def save(self, session_id: str, step: str, state: dict[str, Any]) -> Checkpoint:
         checkpoint = Checkpoint(session_id=session_id, step=step, state=state)

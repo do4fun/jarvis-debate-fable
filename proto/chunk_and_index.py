@@ -54,6 +54,7 @@ class ChunkMetadata:
     text: str
     published_date: date | None = None
     captured_date: date | None = None
+    content_hash: str | None = None  # sha256 of the source page (proto/acquire.py), for hash invalidation (Axe 2.4)
 
 
 def build_chunks(
@@ -64,6 +65,7 @@ def build_chunks(
     level: EvidenceLevel,
     published_date: date | None = None,
     captured_date: date | None = None,
+    content_hash: str | None = None,
     id_prefix: str = "chunk",
 ) -> list[ChunkMetadata]:
     return [
@@ -76,6 +78,7 @@ def build_chunks(
             text=piece,
             published_date=published_date,
             captured_date=captured_date,
+            content_hash=content_hash,
         )
         for i, piece in enumerate(chunk_text(text), start=1)
     ]

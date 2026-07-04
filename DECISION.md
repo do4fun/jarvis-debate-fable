@@ -29,7 +29,16 @@ Gabarit v4 (0.2). Chaque valeur est **proposée** par le prototype après les pr
 | `docs/PLAN_recherche_web.md` | rédigé par le prototype | voir ce fichier — à relire/valider |
 | Référence « Yin 2025 » (§3.3.4, base de S(o)) | non retrouvée | **point ouvert — non bloquant** : la formule S(o) = Σ trust_weight_i·v_i(o) est implémentée indépendamment de la citation ; ajouter la référence à `docs/references-mad.md` dès qu'elle est fournie |
 
+## Phase 3 (nouveau)
+
+| Paramètre | Valeur par défaut | Statut |
+|---|---|---|
+| Seuil de latence bout-en-bout (`proto/jarvis_loop.py`) | `5.0 s` | (proposé — non validé, 3.3 : « seuil proposé puis validé utilisateur ») — à mesurer sur de vrais runs Ollama, pas encore fait |
+| Critères du routeur débat/réponse directe (3.2) | — | **décision actée, inchangée depuis v2/v3 : « définis plus tard »** — `proto/jarvis_loop.py::default_router` répond toujours par une réponse directe (aucun débat) tant qu'aucun critère n'est fourni ; ne pas confondre ce défaut avec une heuristique réfléchie |
+| Config Phase 3 = « config gagnante » de la Phase 2 (3.1) | — | aucune config n'a encore « gagné » : Phase 2 n'a pas été mesurée sur données réelles (`datasets/facts/` vide) |
+
 ## Notes d'implémentation
 
 - Les valeurs ci-dessus sont des **constantes par défaut** dans `proto/scoring.py`, jamais codées en dur ailleurs — un seul point de mise à jour une fois validées.
 - Le juge (étape [7]) ne dépend jamais de S(o)/C(a_i) comme verdict automatique — ce sont des signaux d'entrée, jamais un remplacement (invariant v4 conservé).
+- **Déviation assumée** : `consensus_score` (`proto/scoring.py`) normalise par la somme des trust_weight (S(o) = Σ trust_weight_i·v_i(o) / Σ trust_weight_i), alors que la formule du plan v4 (§3.3.4) n'a pas de terme de normalisation. Choix délibéré pour garder S(o) comparable à θ quel que soit le nombre d'agents ou l'échelle des poids — signalé ici pour qu'un futur lecteur ne le prenne pas pour une erreur de transcription.
