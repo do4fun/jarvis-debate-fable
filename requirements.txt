@@ -1,0 +1,5 @@
+# jarvis-debate-fable — dépendances du prototype (proto/)
+# Aucune dépendance lourde requise pour les tests (unittest stdlib).
+# Requis pour l'exécution réelle du pipeline (hors tests) :
+requests>=2.31        # appels Ollama (/api/generate) et SearXNG (/search)
+trafilatura>=1.8       # extraction de contenu propre depuis les pages archivées (proto/acquire.py)

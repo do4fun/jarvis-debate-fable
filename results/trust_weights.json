@@ -1,0 +1,6 @@
+{
+  "_comment": "Poids de confiance persistants par persona, mis à jour par EMA sur vérité terrain connue uniquement (garde-fou anti-sycophancie, v4 point ouvert n°9). Valeurs initiales neutres en attente des premiers runs.",
+  "alpha": 0.1,
+  "initial_weight": 0.5,
+  "weights": {}
+}
